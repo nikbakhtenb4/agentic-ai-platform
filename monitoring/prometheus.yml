@@ -1,0 +1,64 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # API Gateway
+  - job_name: "api-gateway"
+    static_configs:
+      - targets: ["api-gateway:8000"]
+    metrics_path: "/metrics"
+    scrape_interval: 30s
+
+  # LLM Service
+  - job_name: "llm-service"
+    static_configs:
+      - targets: ["llm-service:8002"]
+    metrics_path: "/metrics"
+    scrape_interval: 60s # فاصله بیشتر برای سرویس سنگین
+    scrape_timeout: 30s # timeout بیشتر برای metrics collection
+    params:
+      collect[]:
+        - "model_inference"
+        - "memory_usage"
+        - "gpu_utilization"
+
+  # Test Service
+  - job_name: "test-service"
+    static_configs:
+      - targets: ["test-service:8001"]
+    metrics_path: "/metrics"
+    scrape_interval: 30s
+
+  # Redis
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis:6379"]
+
+  # PostgreSQL (اگر exporter اضافه کنیم)
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+
+  # Nginx
+  - job_name: "nginx"
+    static_configs:
+      - targets: ["nginx:80"]
+    metrics_path: "/nginx_status"
+
+  # LLM Health Monitoring (جداگانه برای monitoring سلامت)
+  - job_name: "llm-health"
+    static_configs:
+      - targets: ["llm-service:8002"]
+    metrics_path: "/health/metrics"
+    scrape_interval: 120s # چک کردن هر 2 دقیقه
+    scrape_timeout: 45s
