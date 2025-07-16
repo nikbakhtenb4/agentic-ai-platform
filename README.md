@@ -231,20 +231,20 @@ docker system prune -a
 - [x] PostgreSQL & Redis
 - [x] Prometheus & Grafana
 - [x] Health Checks
+- [x] LLM Service (gpt2-fa)
 
-### 🔄 فاز 2 - احراز هویت
+### 🔄 فاز 2 - هوش مصنوعی
+
+- [ ] Text-to-Speech Service
+- [ ] Speech-to-Text Service
+- [ ] Vector Database Integration
+
+### 🔄 فاز 3 - احراز هویت
 
 - [ ] JWT Authentication Service
 - [ ] User Management
 - [ ] API Key System
 - [ ] Permission System
-
-### 🔄 فاز 3 - هوش مصنوعی
-
-- [ ] LLM Service (Ollama)
-- [ ] Text-to-Speech Service
-- [ ] Speech-to-Text Service
-- [ ] Vector Database Integration
 
 ### 🔄 فاز 4 - ابزارها
 
