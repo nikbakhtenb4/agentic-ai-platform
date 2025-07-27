@@ -81,6 +81,32 @@ services:
         reservations:
           memory: 2G
 
+  # GPU Coordinator Service - GPU Resource Management
+  gpu-coordinator:
+    build:
+      context: ./services/gpu-coordinator
+      dockerfile: Dockerfile
+    container_name: agentic-gpu-coordinator
+    ports:
+      - "8080:8080"
+    environment:
+      - ENV=development
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=info
+    depends_on:
+      - redis
+    volumes:
+      - ./services/gpu-coordinator:/app
+      - ./shared:/app/shared
+    networks:
+      - agentic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Test Service (برای تست کردن ارتباط)
   test-service:
     build:
@@ -93,9 +119,11 @@ services:
       - ENV=development
       - REDIS_URL=redis://redis:6379
       - LLM_SERVICE_URL=http://llm-service:8002
+      - GPU_COORDINATOR_URL=http://gpu-coordinator:8080
     depends_on:
       - redis
       - llm-service
+      - gpu-coordinator
     volumes:
       - ./services/test-service:/app
       - ./shared:/app/shared
