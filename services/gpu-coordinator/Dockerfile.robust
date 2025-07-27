@@ -1,0 +1,72 @@
+FROM python:3.11-slim
+
+# 🛠 Set up multiple repository mirrors with fallback
+RUN set -ex && \
+    # Backup original sources.list
+    cp /etc/apt/sources.list /etc/apt/sources.list.bak && \
+    # Try Iranian mirror first
+    (echo "deb http://mirror.arvancloud.ir/debian bookworm main" > /etc/apt/sources.list && \
+     echo "deb http://mirror.arvancloud.ir/debian-security bookworm-security main" >> /etc/apt/sources.list && \
+     apt-get update --fix-missing) || \
+    # Fallback to official debian repositories
+    (echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list && \
+     echo "deb http://deb.debian.org/debian-security bookworm-security main" >> /etc/apt/sources.list && \
+     apt-get update --fix-missing) || \
+    # Fallback to original sources.list
+    (cp /etc/apt/sources.list.bak /etc/apt/sources.list && \
+     apt-get update --fix-missing)
+
+# Install system dependencies with retry logic
+RUN set -ex && \
+    for i in 1 2 3; do \
+        apt-get install -y --no-install-recommends \
+            curl \
+            gcc \
+            g++ \
+            python3-dev \
+            pkg-config && \
+        break || \
+        (echo "Attempt $i failed, retrying..." && sleep 5); \
+    done && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 🏗 Set working directory
+WORKDIR /app
+
+# 📦 Copy only requirements first for caching
+COPY requirements.txt .
+
+# ⚙️ Install Python dependencies with multiple PyPI mirrors
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --prefer-binary \
+        --default-timeout=300 --retries=20 \
+        -r requirements.txt || \
+    pip install --no-cache-dir --prefer-binary \
+        --default-timeout=300 --retries=20 \
+        -i https://pypi.org/simple \
+        -r requirements.txt
+
+# 📁 Copy the app source code
+COPY . /app
+
+# ♻️ Copy shared module (only if it exists)
+COPY --from=build-context ../../shared /app/shared 2>/dev/null || true
+
+# 📚 Set PYTHONPATH to include shared modules
+ENV PYTHONPATH="/app:/app/shared"
+
+# ⚙️ Environment variables
+ENV HOST=0.0.0.0
+ENV PORT=8080
+ENV LOG_LEVEL=info
+
+# ✅ Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# 🌐 Expose port
+EXPOSE 8080
+
+# 🚀 Run the app
+CMD ["python", "main.py"]
