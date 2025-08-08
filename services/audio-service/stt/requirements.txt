@@ -1,0 +1,34 @@
+# Enhanced STT Service Requirements
+
+# Core FastAPI and web server dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Whisper and ML dependencies   
+openai-whisper==20231117
+torch==2.1.0
+torchaudio==2.1.0
+
+# Audio processing
+numpy==1.24.3
+librosa==0.10.1
+soundfile==0.12.1
+
+# Data validation and serialization
+pydantic==2.5.0
+
+# HTTP client for URL downloads and translation services
+httpx==0.25.2
+
+# Async file operations
+aiofiles==23.2.1
+
+# System monitoring
+psutil==5.9.6
+
+# Additional utilities for enhanced features
+python-magic==0.4.27
+
+# URL validation
+validators==0.22.0

@@ -1,0 +1,41 @@
+# services/audio-service/stt/config/stt_config.yaml
+stt_service:
+  model:
+    name: "whisper"
+    size: "base" # tiny, base, small, medium, large
+    device: "auto" # auto, cpu, cuda
+    download_root: "/app/models/stt"
+
+  audio:
+    max_file_size: 25 # MB
+    max_duration: 600 # seconds (10 minutes)
+    supported_formats: [".wav", ".mp3", ".m4a", ".flac", ".ogg", ".webm"]
+    sample_rate: 16000
+
+  languages:
+    supported: ["fa", "en"]
+    auto_detect: true
+    default: "auto"
+
+  processing:
+    normalize_audio: true
+    remove_silence: true
+    enhance_audio: true
+    chunk_duration: 30 # seconds for long audio files
+    overlap_duration: 1 # seconds
+
+  performance:
+    batch_size: 1
+    num_workers: 1
+    max_concurrent_requests: 5
+    timeout: 300 # seconds
+
+  cache:
+    enabled: true
+    ttl: 3600 # seconds (1 hour)
+    max_size: 100 # number of cached results
+
+  logging:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file: "/app/logs/stt.log"

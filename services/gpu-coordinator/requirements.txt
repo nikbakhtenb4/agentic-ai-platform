@@ -1,0 +1,29 @@
+# services/gpu-coordinator/requirements.txt
+
+# FastAPI and web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Async and concurrency
+asyncio-mqtt==0.13.0
+aiofiles==23.2.1
+
+# GPU and hardware monitoring
+torch==2.7.1
+nvidia-ml-py==12.535.108
+psutil==5.9.6
+pynvml==11.5.0
+
+# HTTP client
+httpx==0.25.2
+requests==2.31.0
+
+# Data validation
+pydantic==2.5.0
+
+# Utilities
+python-multipart==0.0.6
+python-json-logger==2.0.7
+
+# Optional: for better performance
+orjson==3.9.10

@@ -1,3 +1,4 @@
+# docker-compose.yml - Updated with All Services - CORRECTED
 # version: "3.8"
 
 services:
@@ -6,8 +7,8 @@ services:
     image: nginx:alpine
     container_name: agentic-nginx
     ports:
-      - "80:80"
-      - "443:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
     depends_on:
@@ -19,23 +20,30 @@ services:
   # API Gateway
   api-gateway:
     build:
-      context: ./services/api-gateway
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: /services/api-gateway/Dockerfile
     container_name: agentic-api-gateway
     ports:
-      - "8000:8000"
+      - "${API_GATEWAY_PORT:-8000}:8000"
     environment:
-      - ENV=development
-      - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:password@postgres:5432/agentic_db
-      - LLM_SERVICE_URL=http://llm-service:8002
+      - ENV=${ENV:-development}
+      - REDIS_URL=${REDIS_URL}
+      - DATABASE_URL=${DATABASE_URL}
+      - LLM_SERVICE_URL=${LLM_SERVICE_URL}
+      - STT_SERVICE_URL=${STT_SERVICE_URL}
+      # - AUTH_SERVICE_URL=${AUTH_SERVICE_URL} # کامنت شد
+      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - LOG_LEVEL=${LOG_LEVEL}
     depends_on:
       - redis
       - postgres
       - llm-service
+      - stt-service
+      - gpu-coordinator
+      # - auth-service # کامنت شد
     volumes:
-      - ./services/api-gateway:/app
-      - ./shared:/app/shared
+      - ./shared:/app/shared:ro # فقط shared را mount کنیم
     networks:
       - agentic-network
     restart: unless-stopped
@@ -48,24 +56,30 @@ services:
   # LLM Service - Language Model Processing
   llm-service:
     build:
-      context: ./services/llm-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./services/llm-service/Dockerfile
     container_name: agentic-llm-service
     ports:
-      - "8002:8002"
+      - "${LLM_SERVICE_PORT:-8002}:8002"
     environment:
-      - ENV=development
-      - REDIS_URL=redis://redis:6379
-      - MODEL_PATH=/app/models/gpt2-fa
-      - MODEL_NAME=gpt2-fa
-      - MAX_LENGTH=512
-      - BATCH_SIZE=1
+      - ENV=${ENV:-development}
+      - REDIS_URL=${REDIS_URL}
+      - MODEL_PATH=${MODEL_PATH}
+      - MODEL_NAME=${MODEL_NAME}
+      - MAX_LENGTH=${MAX_LENGTH}
+      - BATCH_SIZE=${BATCH_SIZE}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
+      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
     depends_on:
       - redis
+      - gpu-coordinator
     volumes:
-      - ./services/llm-service:/app
-      - ./shared:/app/shared
+      - ./shared:/app/shared:ro
       - ./data/models/llm/gpt2-fa:/app/models/gpt2-fa:ro
+      - ./data/cache:/app/data/cache
+      - ./data/logs:/app/logs
     networks:
       - agentic-network
     restart: unless-stopped
@@ -80,25 +94,149 @@ services:
           memory: 4G
         reservations:
           memory: 2G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # STT Service - Speech to Text with Whisper
+  stt-service:
+    build:
+      context: .
+      dockerfile: /services/audio-service/stt/Dockerfile
+    container_name: agentic-stt-service
+    ports:
+      - "${STT_SERVICE_PORT:-8003}:8003"
+    environment:
+      - ENV=${ENV:-development}
+      - REDIS_URL=${REDIS_URL}
+      - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE}
+      - WHISPER_MODEL_PATH=${WHISPER_MODEL_PATH}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB}
+      - MAX_CONCURRENT_REQUESTS=${MAX_CONCURRENT_REQUESTS}
+      - SUPPORTED_LANGUAGES=${SUPPORTED_LANGUAGES}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
+      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
+      - CACHE_ENABLED=${CACHE_ENABLED}
+      - CACHE_TTL=${CACHE_TTL}
+    depends_on:
+      - redis
+      - gpu-coordinator
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./data/models/stt:/app/models
+      - ./data/cache/stt:/app/cache
+      - ./data/logs:/app/logs
+      - ./data/uploads:/app/uploads
+    networks:
+      - agentic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 1.5G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # GPU Coordinator - Manages shared GPU resources
+  gpu-coordinator:
+    build:
+      context: .
+      dockerfile: ./services/gpu-coordinator/Dockerfile
+    container_name: agentic-gpu-coordinator
+    ports:
+      - "${GPU_COORDINATOR_PORT:-8080}:8080"
+    environment:
+      - ENV=${ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - MAX_MEMORY_MB=${MAX_MEMORY_MB}
+      - SCHEDULER_INTERVAL=${SCHEDULER_INTERVAL}
+      - HOST=${GPU_COORDINATOR_HOST:-0.0.0.0}
+      - PORT=${GPU_COORDINATOR_PORT:-8080}
+    volumes:
+      - ./shared:/app/shared:ro # اضافه کردن shared volume
+      - ./data/logs:/app/logs # اضافه کردن logs volume
+    networks:
+      - agentic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Auth Service - Authentication & Authorization - کامنت شد
+  # auth-service:
+  #   build:
+  #     context: .
+  #     dockerfile: /services/auth-service/Dockerfile
+  #   container_name: agentic-auth-service
+  #   ports:
+  #     - "${AUTH_SERVICE_PORT:-8004}:8004"
+  #   environment:
+  #     - ENV=${ENV:-development}
+  #     - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+  #     - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
+  #     - LOG_LEVEL=${LOG_LEVEL}
+  #     - HOST=${AUTH_SERVICE_HOST:-0.0.0.0}
+  #     - PORT=${AUTH_SERVICE_PORT:-8004}
+  #   volumes:
+  #     - ./shared:/app/shared:ro # اضافه کردن shared volume
+  #   networks:
+  #     - agentic-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
 
   # Test Service (برای تست کردن ارتباط)
   test-service:
     build:
-      context: ./services/test-service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: /services/test-service/Dockerfile
     container_name: agentic-test-service
     ports:
-      - "8001:8001"
+      - "${TEST_SERVICE_PORT:-8001}:8001"
     environment:
-      - ENV=development
-      - REDIS_URL=redis://redis:6379
-      - LLM_SERVICE_URL=http://llm-service:8002
+      - ENV=${ENV:-development}
+      - REDIS_URL=${REDIS_URL}
+      - LLM_SERVICE_URL=${LLM_SERVICE_URL}
+      - STT_SERVICE_URL=${STT_SERVICE_URL}
+      - API_GATEWAY_URL=${API_GATEWAY_URL}
+      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
+      # - AUTH_SERVICE_URL=${AUTH_SERVICE_URL} # کامنت شد
+      - LOG_LEVEL=${LOG_LEVEL}
     depends_on:
       - redis
       - llm-service
+      - stt-service
+      - api-gateway
+      - gpu-coordinator
+      # - auth-service # کامنت شد
     volumes:
-      - ./services/test-service:/app
-      - ./shared:/app/shared
+      - ./shared:/app/shared:ro # تنها shared را mount کنیم
     networks:
       - agentic-network
     restart: unless-stopped
@@ -111,6 +249,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    command: redis-server --appendonly yes
     networks:
       - agentic-network
     restart: unless-stopped
@@ -125,11 +264,11 @@ services:
     image: postgres:15-alpine
     container_name: agentic-postgres
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5433}:5432" # تغییر پورت خارجی
     environment:
-      POSTGRES_DB: agentic_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./shared/database/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -137,7 +276,7 @@ services:
       - agentic-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -147,7 +286,7 @@ services:
     image: prom/prometheus:latest
     container_name: agentic-prometheus
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -156,6 +295,7 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--web.console.libraries=/etc/prometheus/console_libraries"
       - "--web.console.templates=/etc/prometheus/consoles"
+      - "--web.enable-lifecycle"
     networks:
       - agentic-network
     restart: unless-stopped
@@ -165,9 +305,9 @@ services:
     image: grafana/grafana:latest
     container_name: agentic-grafana
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT:-3000}:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana:/etc/grafana/provisioning
@@ -178,9 +318,14 @@ services:
 networks:
   agentic-network:
     driver: bridge
+    name: agentic-network
 
 volumes:
   redis_data:
+    name: agentic_redis_data
   postgres_data:
+    name: agentic_postgres_data
   prometheus_data:
+    name: agentic_prometheus_data
   grafana_data:
+    name: agentic_grafana_data

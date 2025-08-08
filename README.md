@@ -323,3 +323,6 @@ Password: admin
 ---
 
 docker compose stop
+
+--------------run script:
+python scripts/setup.py
