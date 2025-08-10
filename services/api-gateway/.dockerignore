@@ -1,0 +1,14 @@
+# services/api-gateway/.dockerignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+logs/*.log
+logs/*.txt
+shared/
+*.tmp
+*.temp
+.git/
+README.md

@@ -1,0 +1,20 @@
+
+# services/audio-service/stt/.dockerignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+logs/*.log
+logs/*.txt
+cache/*.cache
+cache/*.tmp
+temp/*.tmp
+uploads/*
+models/*/
+shared/
+*.tmp
+*.temp
+.git/
+README.md

@@ -260,11 +260,11 @@ def build_services():
 
     # لیست سرویس‌ها برای build
     services_to_build = [
+        ("test-service", "🧪 Test Service"),
         ("gpu-coordinator", "🔄 GPU Coordinator"),
         ("llm-service", "🤖 LLM Service"),
         ("stt-service", "🎙️  STT Service"),
         ("api-gateway", "🌐 API Gateway"),
-        ("test-service", "🧪 Test Service"),
     ]
 
     successful_builds = []

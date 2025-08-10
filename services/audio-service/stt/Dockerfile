@@ -1,4 +1,5 @@
-# audio-service/stt/Dockerfile
+
+# services/audio-service/stt/Dockerfile
 FROM python:3.11-slim
 
 # Set environment variables
@@ -24,7 +25,7 @@ RUN pip install --upgrade pip
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY ./services/audio-service/stt/requirements.txt .
+COPY requirements.txt .
 
 # Install Python dependencies with better error handling
 RUN pip install --timeout=1000 --retries=10 -r requirements.txt
@@ -37,14 +38,9 @@ RUN mkdir -p /app/models \
              /app/temp
 
 # Copy application code
-COPY ./services/audio-service/stt/main.py .
-COPY ./services/audio-service/stt/utils/ ./utils/
-COPY ./services/audio-service/stt/config/ ./config/
+COPY . .
 
-# Copy shared modules
-COPY ./shared /app/shared
-
-# Set PYTHONPATH to include shared modules
+# Set PYTHONPATH - shared will be mounted as volume
 ENV PYTHONPATH="/app:/app/shared"
 
 # Set permissions
@@ -53,7 +49,7 @@ RUN chmod -R 755 /app
 # Expose port
 EXPOSE 8003
 
-# Health check (Fixed: HTTP instead of HTTPS)
+# Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8003/health || exit 1
 

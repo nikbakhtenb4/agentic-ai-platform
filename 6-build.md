@@ -46,3 +46,12 @@ docker build -f services/test-service/Dockerfile -t test-service .
 
 pip install requests  
 python scripts/setup.py
+
+---
+
+(base) PS D:\Project\Server-OpenAI\agentic-ai-platform\services\gpu-coordinator> docker-compose build --no-cache gpu-coordinator
+(base) PS D:\Project\Server-OpenAI\agentic-ai-platform\services\llm-service> docker-compose build --no-cache llm-service
+(base) PS D:\Project\Server-OpenAI\agentic-ai-platform\services\test-service> docker-compose build --no-cache test-service
+(base) PS D:\Project\Server-OpenAI\agentic-ai-platform\services\api-gateway> docker-compose build --no-cache api-gateway
+(base) PS D:\Project\Server-OpenAI\agentic-ai-platform\services\gpu-coordinator> docker-compose build --no-cache gpu-coordinator
+(base) PS D:\Project\Server-OpenAI\agentic-ai-platform\services\audio-service\stt> docker-compose build --no-cache stt-service

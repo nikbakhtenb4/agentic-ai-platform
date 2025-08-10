@@ -1,4 +1,4 @@
-# docker-compose.yml - Updated with All Services - CORRECTED
+# docker-compose.yml - Fixed Cache Issues
 # version: "3.8"
 
 services:
@@ -20,8 +20,9 @@ services:
   # API Gateway
   api-gateway:
     build:
-      context: .
-      dockerfile: /services/api-gateway/Dockerfile
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+      # cache_from را حذف کردید
     container_name: agentic-api-gateway
     ports:
       - "${API_GATEWAY_PORT:-8000}:8000"
@@ -31,7 +32,6 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - LLM_SERVICE_URL=${LLM_SERVICE_URL}
       - STT_SERVICE_URL=${STT_SERVICE_URL}
-      # - AUTH_SERVICE_URL=${AUTH_SERVICE_URL} # کامنت شد
       - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - LOG_LEVEL=${LOG_LEVEL}
@@ -41,9 +41,8 @@ services:
       - llm-service
       - stt-service
       - gpu-coordinator
-      # - auth-service # کامنت شد
     volumes:
-      - ./shared:/app/shared:ro # فقط shared را mount کنیم
+      - ./shared:/app/shared:ro
     networks:
       - agentic-network
     restart: unless-stopped
@@ -56,8 +55,9 @@ services:
   # LLM Service - Language Model Processing
   llm-service:
     build:
-      context: .
-      dockerfile: ./services/llm-service/Dockerfile
+      context: ./services/llm-service
+      dockerfile: Dockerfile
+      # cache_from و args را حذف کردید
     container_name: agentic-llm-service
     ports:
       - "${LLM_SERVICE_PORT:-8002}:8002"
@@ -102,8 +102,9 @@ services:
   # STT Service - Speech to Text with Whisper
   stt-service:
     build:
-      context: .
-      dockerfile: /services/audio-service/stt/Dockerfile
+      context: ./services/audio-service/stt
+      dockerfile: Dockerfile
+      # cache_from و args را حذف کردید
     container_name: agentic-stt-service
     ports:
       - "${STT_SERVICE_PORT:-8003}:8003"
@@ -151,8 +152,9 @@ services:
   # GPU Coordinator - Manages shared GPU resources
   gpu-coordinator:
     build:
-      context: .
-      dockerfile: ./services/gpu-coordinator/Dockerfile
+      context: ./services/gpu-coordinator
+      dockerfile: Dockerfile
+      # cache_from و args را حذف کردید
     container_name: agentic-gpu-coordinator
     ports:
       - "${GPU_COORDINATOR_PORT:-8080}:8080"
@@ -164,8 +166,8 @@ services:
       - HOST=${GPU_COORDINATOR_HOST:-0.0.0.0}
       - PORT=${GPU_COORDINATOR_PORT:-8080}
     volumes:
-      - ./shared:/app/shared:ro # اضافه کردن shared volume
-      - ./data/logs:/app/logs # اضافه کردن logs volume
+      - ./shared:/app/shared:ro
+      - ./data/logs:/app/logs
     networks:
       - agentic-network
     restart: unless-stopped
@@ -185,37 +187,12 @@ services:
               count: 1
               capabilities: [gpu]
 
-  # Auth Service - Authentication & Authorization - کامنت شد
-  # auth-service:
-  #   build:
-  #     context: .
-  #     dockerfile: /services/auth-service/Dockerfile
-  #   container_name: agentic-auth-service
-  #   ports:
-  #     - "${AUTH_SERVICE_PORT:-8004}:8004"
-  #   environment:
-  #     - ENV=${ENV:-development}
-  #     - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-  #     - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES}
-  #     - LOG_LEVEL=${LOG_LEVEL}
-  #     - HOST=${AUTH_SERVICE_HOST:-0.0.0.0}
-  #     - PORT=${AUTH_SERVICE_PORT:-8004}
-  #   volumes:
-  #     - ./shared:/app/shared:ro # اضافه کردن shared volume
-  #   networks:
-  #     - agentic-network
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-
-  # Test Service (برای تست کردن ارتباط)
+  # Test Service
   test-service:
     build:
-      context: .
-      dockerfile: /services/test-service/Dockerfile
+      context: ./services/test-service
+      dockerfile: Dockerfile
+      # cache_from را حذف کردید
     container_name: agentic-test-service
     ports:
       - "${TEST_SERVICE_PORT:-8001}:8001"
@@ -226,7 +203,6 @@ services:
       - STT_SERVICE_URL=${STT_SERVICE_URL}
       - API_GATEWAY_URL=${API_GATEWAY_URL}
       - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
-      # - AUTH_SERVICE_URL=${AUTH_SERVICE_URL} # کامنت شد
       - LOG_LEVEL=${LOG_LEVEL}
     depends_on:
       - redis
@@ -234,9 +210,8 @@ services:
       - stt-service
       - api-gateway
       - gpu-coordinator
-      # - auth-service # کامنت شد
     volumes:
-      - ./shared:/app/shared:ro # تنها shared را mount کنیم
+      - ./shared:/app/shared:ro
     networks:
       - agentic-network
     restart: unless-stopped
@@ -264,7 +239,7 @@ services:
     image: postgres:15-alpine
     container_name: agentic-postgres
     ports:
-      - "${POSTGRES_PORT:-5433}:5432" # تغییر پورت خارجی
+      - "${POSTGRES_PORT:-5433}:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}

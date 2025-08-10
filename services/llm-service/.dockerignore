@@ -1,0 +1,18 @@
+
+# services/llm-service/.dockerignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+logs/*.log
+logs/*.txt
+cache/*.cache
+cache/*.tmp
+shared/
+models/*/
+*.tmp
+*.temp
+.git/
+README.md
