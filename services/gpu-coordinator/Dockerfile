@@ -1,43 +1,42 @@
+# Multi-stage build برای GPU Coordinator
+FROM python:3.10-slim as base
 
-# services/gpu-coordinator/Dockerfile
-FROM python:3.11-slim
+# تنظیم environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        curl \
-        gcc \
-        g++ \
-        python3-dev \
-        pkg-config && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# نصب basic system dependencies only
+RUN apt-get update && apt-get install -y \
+    curl \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# کپی requirements و نصب Python dependencies
 COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies
-RUN pip install --prefer-binary \
-        --default-timeout=300 --retries=10 \
-        -r requirements.txt
+# ایجاد non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Copy application code
+# کپی کد برنامه
 COPY . .
 
-# Set environment variables
-ENV PYTHONPATH="/app:/app/shared"
-ENV HOST=0.0.0.0
-ENV PORT=8080
-ENV LOG_LEVEL=info
+# ایجاد directory های لازم
+RUN mkdir -p /app/logs /app/shared \
+    && chown -R appuser:appuser /app
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+# تغییر به non-root user
+USER appuser
 
 # Expose port
 EXPOSE 8080
 
-# Run application
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
+    CMD curl -f https://localhost:8080/health || exit 1
+
+# اجرای برنامه
 CMD ["python", "main.py"]

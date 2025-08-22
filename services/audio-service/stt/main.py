@@ -26,9 +26,18 @@ import asyncio
 from urllib.parse import urlparse
 import mimetypes
 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+try:
+    from utils.gpu_client import SimpleGPUClient, GPUClientError
+
+    GPU_COORDINATION_AVAILABLE = True
+except ImportError:
+    GPU_COORDINATION_AVAILABLE = False
+    logger.warning("⚠️ GPU Client not available - using direct GPU access")
 
 app = FastAPI(
     title="Enhanced Speech-to-Text Service",
@@ -130,12 +139,85 @@ class EnhancedSTTManager:
             "google": "https://translate.googleapis.com/translate_a/single",
             # می‌تونید سرویس‌های دیگه هم اضافه کنید
         }
+        self.gpu_client = None
+        self.gpu_coordination_enabled = GPU_COORDINATION_AVAILABLE
+        self.coordinator_url = os.getenv(
+            "GPU_COORDINATOR_URL", "https://gpu-coordinator:8080"
+        )
+        self.gpu_memory_requirement = float(os.getenv("STT_GPU_MEMORY_GB", "2.0"))
+
         logger.info(f"🎮 Enhanced STT Manager initialized - Device: {self.device}")
+        if self.gpu_coordination_enabled:
+            logger.info(f"🔄 GPU Coordination enabled - URL: {self.coordinator_url}")
+
+    async def setup_gpu_coordination(self):
+        """تنظیم GPU coordination"""
+        if not self.gpu_coordination_enabled:
+            logger.info("⚠️ GPU coordination not available")
+            return False
+
+        try:
+            self.gpu_client = SimpleGPUClient(
+                coordinator_url=self.coordinator_url, service_name="stt-service"
+            )
+
+            # بررسی در دسترس بودن coordinator
+            if await self.gpu_client.is_coordinator_available():
+                logger.info("✅ GPU Coordinator connected")
+                return True
+            else:
+                logger.warning("⚠️ GPU Coordinator not reachable")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ GPU coordination setup failed: {e}")
+            return False
+
+    async def request_gpu_if_needed(self):
+        """درخواست GPU از coordinator"""
+        if not self.gpu_client:
+            coordination_ok = await self.setup_gpu_coordination()
+            if not coordination_ok:
+                return False
+
+        # اگر قبلاً GPU گرفته‌ایم، استفاده از همان
+        if self.gpu_client.is_gpu_allocated():
+            return True
+
+        try:
+            logger.info(
+                f"🔄 Requesting GPU for STT - Memory: {self.gpu_memory_requirement}GB"
+            )
+
+            allocation = await self.gpu_client.wait_for_gpu(
+                memory_gb=self.gpu_memory_requirement,
+                priority="normal",
+                max_wait_time=60,  # 1 دقیقه انتظار
+            )
+
+            if allocation.allocated:
+                os.environ["CUDA_VISIBLE_DEVICES"] = str(allocation.gpu_id)
+                self.device = f"cuda:{allocation.gpu_id}"
+                logger.info(f"✅ GPU {allocation.gpu_id} allocated for STT")
+                return True
+            else:
+                logger.warning("⚠️ GPU allocation failed - using CPU/direct GPU")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ GPU request failed: {e}")
+            return False
 
     async def load_model(self, model_size: str = "base"):
         """Load Whisper model with enhanced error handling"""
         try:
             logger.info(f"📥 Loading Whisper model: {model_size}")
+
+            gpu_coordination_success = await self.request_gpu_if_needed()
+            if gpu_coordination_success:
+                logger.info(f"🎮 Using coordinated GPU: {self.device}")
+            else:
+                logger.info(f"🖥️ Using direct GPU/CPU: {self.device}")
 
             # Load model with proper configuration
             self.model = whisper.load_model(
@@ -145,12 +227,13 @@ class EnhancedSTTManager:
             )
 
             logger.info("✅ Whisper model loaded successfully")
-
-            # Test model with dummy data
             await self._test_model()
 
         except Exception as e:
             logger.error(f"❌ Failed to load Whisper model: {e}")
+            # در صورت خطا، GPU را آزاد کنید
+            if self.gpu_client and self.gpu_client.is_gpu_allocated():
+                await self.gpu_client.release_gpu()
             raise
 
     async def _test_model(self):
@@ -344,6 +427,12 @@ class EnhancedSTTManager:
             task=task,
             translate_to=translate_to,
         )
+
+    async def cleanup_gpu(self):
+        """پاکسازی GPU coordination"""
+        if self.gpu_client and self.gpu_client.is_gpu_allocated():
+            await self.gpu_client.release_gpu()
+            logger.info("✅ GPU released from coordination")
 
     async def _transcribe_common(
         self,
@@ -606,6 +695,46 @@ async def startup_event():
         raise
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    try:
+        await stt_manager.cleanup_gpu()
+        logger.info("🛑 STT Service shutdown complete")
+    except Exception as e:
+        logger.error(f"⚠️ Shutdown cleanup error: {e}")
+
+
+@app.get("/gpu/status")
+async def get_gpu_status():
+    """وضعیت GPU coordination"""
+    if not stt_manager.gpu_coordination_enabled:
+        return {
+            "gpu_coordination": "disabled",
+            "device": stt_manager.device,
+            "message": "GPU coordination not available",
+        }
+
+    if not stt_manager.gpu_client:
+        return {"gpu_coordination": "not_initialized", "device": stt_manager.device}
+
+    try:
+        coordinator_status = await stt_manager.gpu_client.get_coordinator_status()
+        return {
+            "gpu_coordination": "enabled",
+            "gpu_allocated": stt_manager.gpu_client.is_gpu_allocated(),
+            "current_gpu": stt_manager.gpu_client.get_current_gpu_id(),
+            "device": stt_manager.device,
+            "coordinator_status": coordinator_status,
+        }
+    except Exception as e:
+        return {
+            "gpu_coordination": "error",
+            "error": str(e),
+            "device": stt_manager.device,
+        }
+
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
@@ -623,7 +752,13 @@ async def health_check():
                 if torch.cuda.device_count() > 0
                 else "Unknown",
             }
-
+        gpu_coordination_info = {
+            "enabled": stt_manager.gpu_coordination_enabled,
+            "connected": stt_manager.gpu_client is not None,
+            "allocated": stt_manager.gpu_client.is_gpu_allocated()
+            if stt_manager.gpu_client
+            else False,
+        }
         return {
             "status": "healthy",
             "service": "Enhanced STT Service",
@@ -635,6 +770,7 @@ async def health_check():
             "max_file_size_mb": stt_manager.max_file_size / 1024 / 1024,
             "max_url_file_size_mb": stt_manager.max_url_file_size / 1024 / 1024,
             "gpu_info": gpu_info,
+            "gpu_coordination_info": gpu_coordination_info,
             "features": [
                 "file_upload",
                 "base64_processing",

@@ -204,3 +204,6 @@ docker-compose up -d
 # بررسی استفاده منابع
 docker stats
 ```
+
+C:\Users\Elham>curl -X POST http://localhost:8002/generate -H "Content-Type: application/json" -d "{\"text\": \"چیک شعر عاشقانه چهار بیتی در سبک حافظ بنویس\", \"max_length\": 400, \"temperature\": 0.7}"
+{"detail":"Model not loaded"}

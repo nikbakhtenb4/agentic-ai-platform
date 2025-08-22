@@ -3,7 +3,30 @@
 -- Create extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+-- Initial database setup
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
+CREATE TABLE IF NOT EXISTS gpu_tasks (
+    id SERIAL PRIMARY KEY,
+    task_id VARCHAR(100) UNIQUE NOT NULL,
+    service_name VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL,
+    gpu_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS llm_requests (
+    id SERIAL PRIMARY KEY,
+    request_text TEXT NOT NULL,
+    generated_text TEXT,
+    processing_time FLOAT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 -- Create basic tables for future use
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

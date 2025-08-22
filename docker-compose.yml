@@ -1,227 +1,17 @@
-# docker-compose.yml - Fixed Cache Issues
+# docker-compose.yml - GPU Sharing Platform
 # version: "3.8"
 
 services:
-  # Nginx - Reverse Proxy & Load Balancer
-  nginx:
-    image: nginx:alpine
-    container_name: agentic-nginx
-    ports:
-      - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf
-    depends_on:
-      - api-gateway
-    networks:
-      - agentic-network
-    restart: unless-stopped
+  # ===================
+  # Infrastructure
+  # ===================
 
-  # API Gateway
-  api-gateway:
-    build:
-      context: ./services/api-gateway
-      dockerfile: Dockerfile
-      # cache_from را حذف کردید
-    container_name: agentic-api-gateway
-    ports:
-      - "${API_GATEWAY_PORT:-8000}:8000"
-    environment:
-      - ENV=${ENV:-development}
-      - REDIS_URL=${REDIS_URL}
-      - DATABASE_URL=${DATABASE_URL}
-      - LLM_SERVICE_URL=${LLM_SERVICE_URL}
-      - STT_SERVICE_URL=${STT_SERVICE_URL}
-      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - LOG_LEVEL=${LOG_LEVEL}
-    depends_on:
-      - redis
-      - postgres
-      - llm-service
-      - stt-service
-      - gpu-coordinator
-    volumes:
-      - ./shared:/app/shared:ro
-    networks:
-      - agentic-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # LLM Service - Language Model Processing
-  llm-service:
-    build:
-      context: ./services/llm-service
-      dockerfile: Dockerfile
-      # cache_from و args را حذف کردید
-    container_name: agentic-llm-service
-    ports:
-      - "${LLM_SERVICE_PORT:-8002}:8002"
-    environment:
-      - ENV=${ENV:-development}
-      - REDIS_URL=${REDIS_URL}
-      - MODEL_PATH=${MODEL_PATH}
-      - MODEL_NAME=${MODEL_NAME}
-      - MAX_LENGTH=${MAX_LENGTH}
-      - BATCH_SIZE=${BATCH_SIZE}
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
-      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
-      - LOG_LEVEL=${LOG_LEVEL}
-      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
-    depends_on:
-      - redis
-      - gpu-coordinator
-    volumes:
-      - ./shared:/app/shared:ro
-      - ./data/models/llm/gpt2-fa:/app/models/gpt2-fa:ro
-      - ./data/cache:/app/data/cache
-      - ./data/logs:/app/logs
-    networks:
-      - agentic-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 60s
-      timeout: 30s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-        reservations:
-          memory: 2G
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  # STT Service - Speech to Text with Whisper
-  stt-service:
-    build:
-      context: ./services/audio-service/stt
-      dockerfile: Dockerfile
-      # cache_from و args را حذف کردید
-    container_name: agentic-stt-service
-    ports:
-      - "${STT_SERVICE_PORT:-8003}:8003"
-    environment:
-      - ENV=${ENV:-development}
-      - REDIS_URL=${REDIS_URL}
-      - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE}
-      - WHISPER_MODEL_PATH=${WHISPER_MODEL_PATH}
-      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB}
-      - MAX_CONCURRENT_REQUESTS=${MAX_CONCURRENT_REQUESTS}
-      - SUPPORTED_LANGUAGES=${SUPPORTED_LANGUAGES}
-      - LOG_LEVEL=${LOG_LEVEL}
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}
-      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
-      - CACHE_ENABLED=${CACHE_ENABLED}
-      - CACHE_TTL=${CACHE_TTL}
-    depends_on:
-      - redis
-      - gpu-coordinator
-    volumes:
-      - ./shared:/app/shared:ro
-      - ./data/models/stt:/app/models
-      - ./data/cache/stt:/app/cache
-      - ./data/logs:/app/logs
-      - ./data/uploads:/app/uploads
-    networks:
-      - agentic-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 60s
-      timeout: 30s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 3G
-        reservations:
-          memory: 1.5G
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  # GPU Coordinator - Manages shared GPU resources
-  gpu-coordinator:
-    build:
-      context: ./services/gpu-coordinator
-      dockerfile: Dockerfile
-      # cache_from و args را حذف کردید
-    container_name: agentic-gpu-coordinator
-    ports:
-      - "${GPU_COORDINATOR_PORT:-8080}:8080"
-    environment:
-      - ENV=${ENV:-development}
-      - LOG_LEVEL=${LOG_LEVEL}
-      - MAX_MEMORY_MB=${MAX_MEMORY_MB}
-      - SCHEDULER_INTERVAL=${SCHEDULER_INTERVAL}
-      - HOST=${GPU_COORDINATOR_HOST:-0.0.0.0}
-      - PORT=${GPU_COORDINATOR_PORT:-8080}
-    volumes:
-      - ./shared:/app/shared:ro
-      - ./data/logs:/app/logs
-    networks:
-      - agentic-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-  # Test Service
-  test-service:
-    build:
-      context: ./services/test-service
-      dockerfile: Dockerfile
-      # cache_from را حذف کردید
-    container_name: agentic-test-service
-    ports:
-      - "${TEST_SERVICE_PORT:-8001}:8001"
-    environment:
-      - ENV=${ENV:-development}
-      - REDIS_URL=${REDIS_URL}
-      - LLM_SERVICE_URL=${LLM_SERVICE_URL}
-      - STT_SERVICE_URL=${STT_SERVICE_URL}
-      - API_GATEWAY_URL=${API_GATEWAY_URL}
-      - GPU_COORDINATOR_URL=${GPU_COORDINATOR_URL}
-      - LOG_LEVEL=${LOG_LEVEL}
-    depends_on:
-      - redis
-      - llm-service
-      - stt-service
-      - api-gateway
-      - gpu-coordinator
-    volumes:
-      - ./shared:/app/shared:ro
-    networks:
-      - agentic-network
-    restart: unless-stopped
-
-  # Redis - Cache & Session Store
+  # Redis - Cache & Message Broker
   redis:
     image: redis:7-alpine
     container_name: agentic-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -241,9 +31,9 @@ services:
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-agentic_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./shared/database/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -251,19 +41,291 @@ services:
       - agentic-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Prometheus - Metrics Collection
+  # ===================
+  # GPU Management
+  # ===================
+
+  # GPU Coordinator - مدیریت مشترک GPU
+  gpu-coordinator:
+    build:
+      context: ./services/gpu-coordinator
+      dockerfile: Dockerfile
+    container_name: agentic-gpu-coordinator
+    ports:
+      - "${GPU_COORDINATOR_PORT:-8080}:8080"
+    environment:
+      - ENV=${ENV:-development}
+      - HOST=0.0.0.0
+      - PORT=${GPU_COORDINATOR_PORT:-8080}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MAX_MEMORY_MB=${MAX_MEMORY_MB:-8192}
+      - SCHEDULER_INTERVAL=${SCHEDULER_INTERVAL:-5}
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./data/logs:/app/logs
+    networks:
+      - agentic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # GPU access برای coordinator
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ===================
+  # AI Services
+  # ===================
+
+  # LLM Service - با GPU Sharing
+  llm-service:
+    build:
+      context: ./services/llm-service
+      dockerfile: Dockerfile
+    container_name: agentic-llm-service
+    ports:
+      - "${LLM_SERVICE_PORT:-8002}:8002"
+    environment:
+      - ENV=${ENV:-development}
+      - HOST=0.0.0.0
+      - LLM_SERVICE_PORT=${LLM_SERVICE_PORT:-8002}
+
+      # Model settings
+      - MODEL_NAME=${MODEL_NAME:-gpt2-fa}
+      - MODEL_PATH=${MODEL_PATH:-/app/models/gpt2-fa}
+      - MAX_LENGTH=${MAX_LENGTH:-512}
+      - GPU_MEMORY_GB=${LLM_GPU_MEMORY_GB:-3.0}
+
+      # GPU Coordinator
+      - GPU_COORDINATOR_URL=http://gpu-coordinator:8080
+      - LLM_GPU_MEMORY_GB=${LLM_GPU_MEMORY_GB:-3.0}
+
+      # Cache & Storage
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/${POSTGRES_DB:-agentic_platform}
+
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PRELOAD_MODEL=${PRELOAD_LLM_MODEL:-false}
+    depends_on:
+      - redis
+      - postgres
+      - gpu-coordinator
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./data/models/llm:/app/models:ro
+      - ./data/cache/llm:/app/cache
+      - ./data/logs:/app/logs
+
+      # Copy GPU client library
+      - ./services/gpu-coordinator/gpu_client.py:/app/utils/gpu_client.py:ro
+    networks:
+      - agentic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8002/health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    # Note: GPU تخصیص از طریق coordinator انجام می‌شود
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 2G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # STT Service - با GPU Sharing
+  stt-service:
+    build:
+      context: ./services/audio-service/stt
+      dockerfile: Dockerfile
+    container_name: agentic-stt-service
+    ports:
+      - "${STT_SERVICE_PORT:-8003}:8003"
+    environment:
+      - ENV=${ENV:-development}
+      - HOST=0.0.0.0
+      - STT_SERVICE_PORT=${STT_SERVICE_PORT:-8003}
+
+      # Whisper settings
+      - WHISPER_MODEL_SIZE=${WHISPER_MODEL_SIZE:-medium}
+      - WHISPER_MODEL_PATH=/app/models
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-25}
+      - SUPPORTED_LANGUAGES=${SUPPORTED_LANGUAGES:-fa,en}
+      - TEMP_DIR=/tmp/stt
+
+      # GPU Coordinator
+      - GPU_COORDINATOR_URL=http://gpu-coordinator:8080
+      - STT_GPU_MEMORY_GB=${STT_GPU_MEMORY_GB:-2.0}
+
+      # Cache & Storage
+      - REDIS_URL=redis://redis:6379
+      - CACHE_ENABLED=${CACHE_ENABLED:-true}
+      - CACHE_TTL=${CACHE_TTL:-3600}
+
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - PRELOAD_MODEL=${PRELOAD_STT_MODEL:-false}
+    depends_on:
+      - redis
+      - gpu-coordinator
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./data/models/stt:/app/models
+      - ./data/cache/stt:/app/cache
+      - ./data/logs:/app/logs
+      - ./data/uploads:/tmp/stt
+
+      # Copy GPU client library
+      - ./services/gpu-coordinator/gpu_client.py:/app/utils/gpu_client.py:ro
+    networks:
+      - agentic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8003/health"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ===================
+  # API & Gateway
+  # ===================
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: agentic-api-gateway
+    ports:
+      - "${API_GATEWAY_PORT:-8000}:8000"
+    environment:
+      - ENV=${ENV:-development}
+      - HOST=0.0.0.0
+      - API_GATEWAY_PORT=${API_GATEWAY_PORT:-8000}
+
+      # Service URLs
+      - LLM_SERVICE_URL=http://llm-service:8002
+      - STT_SERVICE_URL=http://stt-service:8003
+      - GPU_COORDINATOR_URL=http://gpu-coordinator:8080
+
+      # Database & Cache
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres123}@postgres:5432/${POSTGRES_DB:-agentic_platform}
+
+      # Security
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - redis
+      - postgres
+      - llm-service
+      - stt-service
+      - gpu-coordinator
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./data/logs:/app/logs
+    networks:
+      - agentic-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "https://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx - Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: agentic-nginx
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api-gateway
+    networks:
+      - agentic-network
+    restart: unless-stopped
+
+  # ===================
+  # Development & Testing
+  # ===================
+
+  # Test Service
+  test-service:
+    build:
+      context: ./services/test-service
+      dockerfile: Dockerfile
+    container_name: agentic-test-service
+    ports:
+      - "${TEST_SERVICE_PORT:-8001}:8001"
+    environment:
+      - ENV=${ENV:-development}
+      - HOST=0.0.0.0
+      - TEST_SERVICE_PORT=${TEST_SERVICE_PORT:-8001}
+
+      # Service URLs for testing
+      - API_GATEWAY_URL=http://api-gateway:8000
+      - LLM_SERVICE_URL=http://llm-service:8002
+      - STT_SERVICE_URL=http://stt-service:8003
+      - GPU_COORDINATOR_URL=http://gpu-coordinator:8080
+
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      - redis
+      - api-gateway
+      - llm-service
+      - stt-service
+      - gpu-coordinator
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./data/logs:/app/logs
+    networks:
+      - agentic-network
+    restart: unless-stopped
+
+  # ===================
+  # Monitoring
+  # ===================
+
+  # Prometheus - Metrics
   prometheus:
     image: prom/prometheus:latest
     container_name: agentic-prometheus
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -275,20 +337,25 @@ services:
       - agentic-network
     restart: unless-stopped
 
-  # Grafana - Monitoring Dashboard
+  # Grafana - Dashboards
   grafana:
     image: grafana/grafana:latest
     container_name: agentic-grafana
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana:/etc/grafana/provisioning
+      - ./monitoring/grafana:/etc/grafana/provisioning:ro
     networks:
       - agentic-network
     restart: unless-stopped
+
+# ===================
+# Networks & Volumes
+# ===================
 
 networks:
   agentic-network:

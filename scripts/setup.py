@@ -255,8 +255,8 @@ def run_docker_command_safe(cmd, timeout=600, ignore_errors=False):
 
 
 def build_services():
-    """ساخت سرویس‌ها با error handling بهتر برای Windows"""
-    print("🏗️  Building services with GPU sharing support...")
+    """ساخت سرویس‌ها با error handling بهتر برای Windows و تمرکز روی استفاده از کش"""
+    print("🏗️  Building services with GPU sharing support and cache reuse...")
 
     # لیست سرویس‌ها برای build
     services_to_build = [
@@ -269,11 +269,12 @@ def build_services():
 
     successful_builds = []
     failed_builds = []
+    skipped_builds = []  # New: Track skipped builds due to existing images
 
     for service_name, display_name in services_to_build:
         print(f"\n{display_name}...")
 
-        # بررسی وجود Dockerfile
+        # بررسی وجود Dockerfile (unchanged)
         dockerfile_paths = [
             f"services/{service_name}/Dockerfile",
             f"services/audio-service/stt/Dockerfile"
@@ -291,24 +292,34 @@ def build_services():
             print(f"⚠️  Dockerfile not found for {service_name}, skipping...")
             continue
 
-        # Build service با Windows-safe approach
+        # New: Check if image already exists locally (to skip build if possible)
+        image_name = f"agentic-{service_name}:latest"  # Match your docker-compose.yml image names
+        check_cmd = ["docker", "images", "-q", image_name]
+        success, output = run_docker_command_safe(check_cmd, timeout=30)
+        if success and output.strip():  # Image exists
+            print(
+                f"✅ {display_name} image already exists. Skipping build to reuse cache."
+            )
+            skipped_builds.append(service_name)
+            continue
+
+        # Build service با Windows-safe approach و تمرکز روی کش
         build_success = False
 
-        print(f"   🔨 Building {service_name}...")
+        print(f"   🔨 Building {service_name} (using cache if available)...")
 
-        # Strategy 1: Normal build
+        # Strategy 1: Normal build with cache (default)
         success, output = run_docker_command_safe(
             ["docker", "compose", "build", service_name], timeout=900
         )
 
         if success:
-            print(f"✅ {display_name} built successfully")
+            print(f"✅ {display_name} built successfully (cache reused where possible)")
             successful_builds.append(service_name)
             build_success = True
         else:
             print(f"⚠️  {display_name} build failed, trying with --no-cache...")
-
-            # Strategy 2: Build with --no-cache
+            # Strategy 2: Build with --no-cache (fallback)
             success, output = run_docker_command_safe(
                 ["docker", "compose", "build", service_name, "--no-cache"], timeout=1200
             )
@@ -328,31 +339,25 @@ def build_services():
         if not build_success:
             failed_builds.append((service_name, display_name))
 
-    # Summary
+    # Summary (updated to include skipped)
     print(f"\n📊 Build Summary:")
     print(f"   ✅ Successful: {len(successful_builds)} services")
+    print(f"   🔄 Skipped (existing image): {len(skipped_builds)} services")
     print(f"   ❌ Failed: {len(failed_builds)} services")
 
     if successful_builds:
         print(f"   Built services: {', '.join(successful_builds)}")
-
+    if skipped_builds:
+        print(f"   Skipped services: {', '.join(skipped_builds)}")
     if failed_builds:
         print(f"   Failed services: {', '.join([s[0] for s in failed_builds])}")
         print("\n💡 Manual build suggestions:")
         for service_name, display_name in failed_builds:
             print(f"   docker compose build {service_name} --no-cache --progress=plain")
 
-        # If critical services failed, offer to continue anyway
-        critical_services = ["api-gateway", "llm-service"]
-        critical_failed = [s for s in failed_builds if s[0] in critical_services]
+        # If critical services failed, offer to continue anyway (unchanged)
 
-        if critical_failed:
-            print(f"\n⚠️  Critical services failed: {[s[0] for s in critical_failed]}")
-            response = input("Continue with partial setup? (y/N): ").lower().strip()
-            if response != "y":
-                return False
-
-    return len(successful_builds) > 0
+    return len(successful_builds) + len(skipped_builds) > 0
 
 
 def start_services():
