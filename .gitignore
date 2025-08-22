@@ -1,2 +1,3 @@
 data/models/
 services/llm-service/main.py
+data/
