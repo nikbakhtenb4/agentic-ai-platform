@@ -282,19 +282,129 @@ def detect_gpus():
 
 
 def find_best_gpu(memory_needed: float) -> Optional[int]:
-    """یافتن بهترین GPU برای تخصیص"""
-    available_gpus = [
-        (gpu_id, gpu)
-        for gpu_id, gpu in gpu_devices.items()
-        if gpu.available and gpu.memory_free_gb >= memory_needed
-    ]
+    """یافتن بهترین GPU برای تخصیص با debug بهتر"""
+    logger.info(f"🔍 Looking for GPU with {memory_needed}GB memory")
+
+    # بروزرسانی اطلاعات GPU
+    detect_gpus()
+
+    logger.info(f"📊 Total GPUs detected: {len(gpu_devices)}")
+    for gpu_id, gpu in gpu_devices.items():
+        logger.info(
+            f"  GPU {gpu_id}: {gpu.name}, Free: {gpu.memory_free_gb}GB, Available: {gpu.available}"
+        )
+
+    # بررسی GPU های در دسترس
+    available_gpus = []
+    for gpu_id, gpu in gpu_devices.items():
+        logger.info(f"🔍 Checking GPU {gpu_id}:")
+        logger.info(f"  - Available: {gpu.available}")
+        logger.info(f"  - Free memory: {gpu.memory_free_gb}GB")
+        logger.info(f"  - Needed memory: {memory_needed}GB")
+        logger.info(f"  - Already allocated: {gpu_id in allocated_gpus}")
+
+        # شرایط تخصیص:
+        # 1. GPU available باشد
+        # 2. حافظه کافی داشته باشد
+        # 3. قبلاً تخصیص داده نشده باشد
+        if (
+            gpu.available
+            and gpu.memory_free_gb >= memory_needed
+            and gpu_id not in allocated_gpus
+        ):
+            available_gpus.append((gpu_id, gpu))
+            logger.info(f"✅ GPU {gpu_id} is suitable")
+        else:
+            reasons = []
+            if not gpu.available:
+                reasons.append("not available")
+            if gpu.memory_free_gb < memory_needed:
+                reasons.append(
+                    f"insufficient memory ({gpu.memory_free_gb}GB < {memory_needed}GB)"
+                )
+            if gpu_id in allocated_gpus:
+                reasons.append("already allocated")
+            logger.info(f"❌ GPU {gpu_id} rejected: {', '.join(reasons)}")
 
     if not available_gpus:
+        logger.warning(f"⚠️ No suitable GPU found for {memory_needed}GB request")
         return None
 
     # مرتب‌سازی براساس حافظه آزاد (بیشترین اول)
     available_gpus.sort(key=lambda x: x[1].memory_free_gb, reverse=True)
-    return available_gpus[0][0]
+    selected_gpu = available_gpus[0][0]
+
+    logger.info(
+        f"🎯 Selected GPU {selected_gpu} with {available_gpus[0][1].memory_free_gb}GB free"
+    )
+    return selected_gpu
+
+
+# Background task برای cleanup expired tasks
+async def cleanup_expired_tasks():
+    """Background task برای پاک کردن task های expired"""
+    while True:
+        try:
+            current_time = datetime.now()
+            expired_tasks = []
+
+            # پیدا کردن task های expired
+            for task_id, allocation in gpu_allocations.items():
+                if allocation.get("status") == "running":
+                    expires_at = allocation.get("expires_at")
+                    if expires_at and current_time > expires_at:
+                        expired_tasks.append(task_id)
+                        logger.warning(f"⏰ Found expired task: {task_id}")
+
+            # پاک کردن task های expired
+            for task_id in expired_tasks:
+                try:
+                    await force_release_task(task_id)
+                    logger.info(f"🧹 Auto-released expired task: {task_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to auto-release {task_id}: {e}")
+
+            # صبر 30 ثانیه قبل از چک بعدی
+            await asyncio.sleep(30)
+
+        except Exception as e:
+            logger.error(f"❌ Cleanup task error: {e}")
+            await asyncio.sleep(60)
+
+
+async def force_release_task(task_id: str):
+    """Force release یک task"""
+    if task_id not in gpu_allocations:
+        return False
+
+    allocation = gpu_allocations[task_id]
+    gpu_id = allocation.get("gpu_id")
+    memory_requested = allocation.get("memory_requested", 0)
+
+    # بروزرسانی وضعیت
+    allocation["status"] = "expired_released"
+    allocation["completed_at"] = datetime.now()
+
+    # آزادسازی حافظه GPU
+    if gpu_id is not None and gpu_id in gpu_devices:
+        gpu_devices[gpu_id].running_tasks = max(
+            0, gpu_devices[gpu_id].running_tasks - 1
+        )
+        gpu_devices[gpu_id].memory_used_gb = max(
+            0, gpu_devices[gpu_id].memory_used_gb - memory_requested
+        )
+        gpu_devices[gpu_id].memory_free_gb += memory_requested
+        gpu_devices[gpu_id].available = True
+
+        # Remove from allocated_gpus
+        if gpu_id in allocated_gpus:
+            del allocated_gpus[gpu_id]
+
+    logger.info(f"🔧 Force released GPU {gpu_id} (task: {task_id})")
+
+    # پردازش صف انتظار
+    await process_queue()
+    return True
 
 
 @app.on_event("startup")
@@ -313,6 +423,10 @@ async def startup_event():
             logger.info("✅ pynvml installed successfully")
         except:
             logger.warning("⚠️ Could not install pynvml, using fallback methods")
+
+    # شروع cleanup task
+    asyncio.create_task(cleanup_expired_tasks())
+    logger.info("🧹 Started background cleanup task")
 
 
 @app.get("/health")
@@ -561,8 +675,18 @@ async def get_gpu_specific_stats(gpu_id: int):
 
 @app.post("/request")
 async def request_gpu(request: GPURequest):
-    """درخواست تخصیص GPU"""
+    """درخواست تخصیص GPU با timeout بهتر"""
     task_id = f"task_{len(gpu_allocations)}_{int(datetime.now().timestamp())}"
+
+    # افزایش timeout پیش‌فرض
+    timeout_seconds = max(request.timeout, 600)  # حداقل 10 دقیقه
+
+    logger.info(f"📥 GPU request received:")
+    logger.info(f"  Service: {request.service_name}")
+    logger.info(f"  Memory needed: {request.estimated_memory}GB")
+    logger.info(f"  Priority: {request.priority}")
+    logger.info(f"  Task ID: {task_id}")
+    logger.info(f"  Timeout: {timeout_seconds}s")
 
     # Update counters
     gpu_manager.total_requests += 1
@@ -572,6 +696,8 @@ async def request_gpu(request: GPURequest):
 
     if gpu_id is not None:
         # تخصیص موفق
+        expires_at = datetime.now() + timedelta(seconds=timeout_seconds)
+
         gpu_allocations[task_id] = {
             "service_name": request.service_name,
             "gpu_id": gpu_id,
@@ -579,7 +705,7 @@ async def request_gpu(request: GPURequest):
             "memory_requested": request.estimated_memory,
             "priority": request.priority,
             "created_at": datetime.now(),
-            "expires_at": datetime.now() + timedelta(seconds=request.timeout),
+            "expires_at": expires_at,
         }
 
         # Update allocated_gpus
@@ -590,12 +716,13 @@ async def request_gpu(request: GPURequest):
             "task_id": task_id,
         }
 
-        # به‌روزرسانی وضعیت GPU
+        # بروزرسانی وضعیت GPU
         if gpu_id in gpu_devices:
             gpu_devices[gpu_id].running_tasks += 1
             gpu_devices[gpu_id].memory_used_gb += request.estimated_memory
             gpu_devices[gpu_id].memory_free_gb -= request.estimated_memory
 
+            # تنظیم availability
             if gpu_devices[gpu_id].memory_free_gb < 0.5:  # حداقل 500MB آزاد
                 gpu_devices[gpu_id].available = False
 
@@ -604,13 +731,17 @@ async def request_gpu(request: GPURequest):
         logger.info(
             f"✅ GPU {gpu_id} allocated to {request.service_name} (task: {task_id})"
         )
+        logger.info(f"📊 Remaining free memory: {gpu_devices[gpu_id].memory_free_gb}GB")
+        logger.info(f"⏰ Expires at: {expires_at}")
 
         return {
             "task_id": task_id,
             "gpu_id": gpu_id,
             "allocated": True,
             "message": f"GPU {gpu_id} allocated successfully",
-            "expires_at": gpu_allocations[task_id]["expires_at"],
+            "memory_allocated": request.estimated_memory,
+            "expires_at": expires_at,
+            "timeout_seconds": timeout_seconds,
         }
     else:
         # اضافه کردن به صف انتظار
@@ -623,13 +754,15 @@ async def request_gpu(request: GPURequest):
             "priority": request.priority,
             "queued_at": time.time(),
             "wait_time": 0,
+            "timeout_seconds": timeout_seconds,
         }
         task_queue.append(queue_item)
         request_queue.append(queue_item)
 
         gpu_manager.failed_allocations += 1
 
-        logger.warning(f"⚠️ No GPU available for {request.service_name}, added to queue")
+        logger.warning(f"⚠️ No GPU available for {request.service_name}")
+        logger.info(f"📋 Added to queue at position {len(task_queue)}")
 
         return {
             "task_id": task_id,
@@ -637,8 +770,105 @@ async def request_gpu(request: GPURequest):
             "allocated": False,
             "message": "No GPU available, added to queue",
             "queue_position": len(task_queue),
-            "estimated_wait_time": len(task_queue) * 60,  # تخمین 1 دقیقه به ازای هر تسک
+            "estimated_wait_time": len(task_queue) * 60,
         }
+
+
+# اضافه کردن endpoint برای manual cleanup
+@app.post("/cleanup/expired")
+async def cleanup_expired_manual():
+    """Manual cleanup expired tasks"""
+    current_time = datetime.now()
+    expired_count = 0
+
+    expired_tasks = []
+    for task_id, allocation in gpu_allocations.items():
+        if allocation.get("status") == "running":
+            expires_at = allocation.get("expires_at")
+            if expires_at and current_time > expires_at:
+                expired_tasks.append(task_id)
+
+    for task_id in expired_tasks:
+        try:
+            await force_release_task(task_id)
+            expired_count += 1
+        except Exception as e:
+            logger.error(f"Failed to release {task_id}: {e}")
+
+    return {
+        "status": "success",
+        "expired_tasks_released": expired_count,
+        "released_tasks": expired_tasks,
+    }
+
+
+# اضافه کردن endpoint برای force release هر task
+@app.post("/release/force/{task_id}")
+async def force_release_endpoint(task_id: str):
+    """Force release specific task"""
+    success = await force_release_task(task_id)
+    if success:
+        return {"status": "success", "message": f"Task {task_id} force released"}
+    else:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+
+# اضافه کردن endpoint debug برای troubleshooting
+@app.get("/debug/allocation")
+async def debug_allocation():
+    """Debug endpoint برای بررسی وضعیت تخصیصات"""
+    detect_gpus()  # بروزرسانی اطلاعات
+
+    return {
+        "gpu_devices": {
+            str(gpu_id): {
+                "name": gpu.name,
+                "memory_total_gb": gpu.memory_total_gb,
+                "memory_used_gb": gpu.memory_used_gb,
+                "memory_free_gb": gpu.memory_free_gb,
+                "available": gpu.available,
+                "running_tasks": gpu.running_tasks,
+                "utilization_percent": gpu.utilization_percent,
+            }
+            for gpu_id, gpu in gpu_devices.items()
+        },
+        "allocated_gpus": allocated_gpus,
+        "active_allocations": len(allocated_gpus),
+        "queue_length": len(task_queue),
+        "total_allocations": len(gpu_allocations),
+    }
+
+
+# اضافه کردن endpoint برای force release GPU
+@app.post("/debug/force-release/{gpu_id}")
+async def force_release_gpu(gpu_id: int):
+    """Force release GPU برای debugging"""
+    if gpu_id in allocated_gpus:
+        allocation = allocated_gpus[gpu_id]
+        task_id = allocation.get("task_id")
+        memory_gb = allocation.get("memory_gb", 0)
+
+        # پاک کردن تخصیص
+        del allocated_gpus[gpu_id]
+
+        # بروزرسانی GPU device
+        if gpu_id in gpu_devices:
+            gpu_devices[gpu_id].memory_used_gb -= memory_gb
+            gpu_devices[gpu_id].memory_free_gb += memory_gb
+            gpu_devices[gpu_id].running_tasks = max(
+                0, gpu_devices[gpu_id].running_tasks - 1
+            )
+            gpu_devices[gpu_id].available = True
+
+        # پاک کردن از allocation list
+        if task_id and task_id in gpu_allocations:
+            gpu_allocations[task_id]["status"] = "force_released"
+
+        logger.info(f"🔧 Force released GPU {gpu_id}")
+
+        return {"status": "success", "message": f"GPU {gpu_id} force released"}
+    else:
+        return {"status": "error", "message": f"GPU {gpu_id} not allocated"}
 
 
 @app.post("/release/{task_id}")
@@ -699,6 +929,9 @@ async def process_queue():
         if gpu_id is not None:
             # تخصیص از صف
             task_id = queue_item["task_id"]
+            timeout_seconds = queue_item.get("timeout_seconds", 600)
+            expires_at = datetime.now() + timedelta(seconds=timeout_seconds)
+
             gpu_allocations[task_id] = {
                 "service_name": queue_item["service_name"],
                 "gpu_id": gpu_id,
@@ -707,6 +940,7 @@ async def process_queue():
                 "priority": queue_item["priority"],
                 "created_at": datetime.now(),
                 "queued_at": queue_item["queued_at"],
+                "expires_at": expires_at,
             }
 
             # Update allocated_gpus

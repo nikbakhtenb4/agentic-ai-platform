@@ -159,6 +159,9 @@ services:
     ports:
       - "${STT_SERVICE_PORT:-8003}:8003"
     environment:
+      - TIMEOUT_SECONDS=1800 # 30 دقیقه به جای 300
+      - GPU_COORDINATION_ENABLED=false #
+      - CUDA_VISIBLE_DEVICES=0
       - ENV=${ENV:-development}
       - HOST=0.0.0.0
       - PORT=${STT_SERVICE_PORT:-8003} # اضافه کردن PORT به جای STT_SERVICE_PORT

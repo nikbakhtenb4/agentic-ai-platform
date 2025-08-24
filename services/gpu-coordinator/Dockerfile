@@ -1,4 +1,5 @@
 # Multi-stage build برای GPU Coordinator
+# services/gpu-coordinator/DockerFile
 FROM python:3.10-slim as base
 
 # تنظیم environment variables
