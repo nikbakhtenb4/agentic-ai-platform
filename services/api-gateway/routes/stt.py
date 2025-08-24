@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stt", tags=["Speech-to-Text"])
 
-STT_SERVICE_URL = os.getenv("STT_SERVICE_URL", "https://stt-service:8003")
+STT_SERVICE_URL = os.getenv("STT_SERVICE_URL", "http://stt-service:8003")
 
 
 # Request models

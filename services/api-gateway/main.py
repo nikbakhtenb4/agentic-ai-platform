@@ -73,10 +73,10 @@ async def lifespan(app: FastAPI):
 async def test_service_connections():
     """Test connections to microservices on startup"""
     services = {
-        "LLM Service": os.getenv("LLM_SERVICE_URL", "https://llm-service:8001"),
-        "STT Service": os.getenv("STT_SERVICE_URL", "https://stt-service:8002"),
+        "LLM Service": os.getenv("LLM_SERVICE_URL", "http://llm-service:8001"),
+        "STT Service": os.getenv("STT_SERVICE_URL", "http://stt-service:8002"),
         "GPU Coordinator": os.getenv(
-            "GPU_COORDINATOR_URL", "https://gpu-coordinator:8080"
+            "GPU_COORDINATOR_URL", "http://gpu-coordinator:8080"
         ),
     }
 
@@ -186,10 +186,10 @@ async def health_check():
 
     # Check microservices
     microservices = {
-        "llm": os.getenv("LLM_SERVICE_URL", "https://llm-service:8001"),
-        "stt": os.getenv("STT_SERVICE_URL", "https://stt-service:8002"),
+        "llm": os.getenv("LLM_SERVICE_URL", "http://llm-service:8001"),
+        "stt": os.getenv("STT_SERVICE_URL", "http://stt-service:8002"),
         "gpu_coordinator": os.getenv(
-            "GPU_COORDINATOR_URL", "https://gpu-coordinator:8080"
+            "GPU_COORDINATOR_URL", "http://gpu-coordinator:8080"
         ),
     }
 
@@ -279,10 +279,10 @@ async def test_connections(redis: redis.Redis = Depends(get_redis), db=Depends(g
 
     # Test microservices
     microservices = {
-        "llm_service": os.getenv("LLM_SERVICE_URL", "https://llm-service:8001"),
+        "llm_service": os.getenv("LLM_SERVICE_URL", "http://llm-service:8001"),
         "stt_service": os.getenv("STT_SERVICE_URL", "http://stt-service:8002"),
         "gpu_coordinator": os.getenv(
-            "GPU_COORDINATOR_URL", "https://gpu-coordinator:8080"
+            "GPU_COORDINATOR_URL", "http://gpu-coordinator:8080"
         ),
     }
 
@@ -335,7 +335,7 @@ async def metrics():
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
-                f"{os.getenv('GPU_COORDINATOR_URL', 'https://gpu-coordinator:8080')}/stats"
+                f"{os.getenv('GPU_COORDINATOR_URL', 'http://gpu-coordinator:8080')}/stats"
             )
             if response.status_code == 200:
                 gpu_stats = response.json()
@@ -359,7 +359,7 @@ async def list_services():
 
     microservices = {
         "llm_service": {
-            "url": os.getenv("LLM_SERVICE_URL", "https://llm-service:8001"),
+            "url": os.getenv("LLM_SERVICE_URL", "http://llm-service:8001"),
             "description": "Large Language Model Service",
         },
         "stt_service": {
@@ -367,7 +367,7 @@ async def list_services():
             "description": "Speech-to-Text Service",
         },
         "gpu_coordinator": {
-            "url": os.getenv("GPU_COORDINATOR_URL", "https://gpu-coordinator:8080"),
+            "url": os.getenv("GPU_COORDINATOR_URL", "http://gpu-coordinator:8080"),
             "description": "GPU Resource Coordinator",
         },
     }

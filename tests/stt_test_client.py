@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 
 
 class STTTestSuite:
-    def __init__(self, base_url: str = "https://localhost"):
+    def __init__(self, base_url: str = "http://localhost"):
         self.base_url = base_url.rstrip("/")
         self.stt_direct_url = f"{self.base_url}:8003"
         self.stt_gateway_url = f"{self.base_url}/api/v1/stt"
@@ -585,7 +585,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Enhanced STT Test Suite")
-    parser.add_argument("--url", default="https://localhost", help="Base URL")
+    parser.add_argument("--url", default="http://localhost", help="Base URL")
     parser.add_argument("--audio-file", help="Path to test audio file")
     parser.add_argument(
         "--test",

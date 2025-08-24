@@ -11,3 +11,11 @@ docker-compose restart llm-service
 
 لاگ:
 docker logs -f agentic-llm-service
+
+Stop همه کانتینرهای در حال اجرا
+docker stop $(docker ps -q)
+
+لاگ گیری:
+docker compose logs -f stt-service
+
+docker compose logs api-gateway --tail=20

@@ -1,3 +1,4 @@
+# services/gpu-coordinator/gpu_client.py
 """
 Simple GPU Client for services - Fixed Version
 """
@@ -15,7 +16,7 @@ class SimpleGPUClient:
     def __init__(self, coordinator_url=None, service_name="unknown"):
         # 🔧 Fixed: استفاده از http بجای https
         self.coordinator_url = coordinator_url or os.getenv(
-            "GPU_COORDINATOR_URL", "https://gpu-coordinator:8080"
+            "GPU_COORDINATOR_URL", "http://gpu-coordinator:8080"
         )
         self.service_name = service_name
         self.current_task_id = None

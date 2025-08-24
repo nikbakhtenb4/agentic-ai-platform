@@ -72,7 +72,7 @@ services:
       - agentic-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -134,7 +134,7 @@ services:
       - agentic-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost:8002/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 60s
       timeout: 30s
       retries: 3
@@ -161,6 +161,7 @@ services:
     environment:
       - ENV=${ENV:-development}
       - HOST=0.0.0.0
+      - PORT=${STT_SERVICE_PORT:-8003} # اضافه کردن PORT به جای STT_SERVICE_PORT
       - STT_SERVICE_PORT=${STT_SERVICE_PORT:-8003}
 
       # Whisper settings
@@ -192,12 +193,12 @@ services:
       - ./data/uploads:/tmp/stt
 
       # Copy GPU client library
-      - ./services/gpu-coordinator/gpu_client.py:/app/utils/gpu_client.py:ro
+      - ./services/gpu-coordinator/gpu_client.py:/app/stt/utils/gpu_client.py:ro
     networks:
       - agentic-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost:8003/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
       interval: 60s
       timeout: 30s
       retries: 3
@@ -256,7 +257,7 @@ services:
       - agentic-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -267,7 +268,7 @@ services:
     container_name: agentic-nginx
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
-      - "${NGINX_HTTPS_PORT:-443}:443"
+      # - "${NGINX_HTTP_PORT:-443}:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:

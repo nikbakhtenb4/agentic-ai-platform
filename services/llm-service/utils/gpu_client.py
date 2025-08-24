@@ -1,3 +1,4 @@
+# services\llm-service\utils\gpu_client.py
 """
 GPU Client for LLM Service - FIXED VERSION
 Integration with GPU Coordinator with better error handling

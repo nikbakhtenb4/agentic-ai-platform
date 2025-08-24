@@ -1,11 +1,10 @@
-# me
-# services/audio-service/stt/main.py (Enhanced for Mobile/Web)
 #!/usr/bin/env python3
 """
 Enhanced Speech-to-Text Service
 سرویس تبدیل گفتار به متن پیشرفته با پشتیبانی از منابع مختلف ورودی
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -15,7 +14,7 @@ import tempfile
 import os
 import httpx
 import aiofiles
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict, Any
 import logging
 from pathlib import Path
 import uvicorn
@@ -38,27 +37,6 @@ try:
 except ImportError:
     GPU_COORDINATION_AVAILABLE = False
     logger.warning("⚠️ GPU Client not available - using direct GPU access")
-
-app = FastAPI(
-    title="Enhanced Speech-to-Text Service",
-    description="Advanced STT service with multiple input sources and online translation",
-    version="2.0.0",
-)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://localhost:3000",
-        "https://localhost:3001",
-        "https://localhost:8080",
-        "https://yourdomain.com",  # اضافه کردن دامین خودتون
-        "*",  # در production محدود کنید
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
 
 
 # Response models
@@ -116,6 +94,19 @@ class StreamingAudioConfig(BaseModel):
     language: Optional[str] = Field(None, description="Expected language")
 
 
+class ModelInfoResponse(BaseModel):
+    model_name: str
+    supported_languages: List[str]
+    device: str
+    max_file_size_mb: int
+    model_size: str
+
+
+class FormatsResponse(BaseModel):
+    supported_formats: List[str]
+    max_file_size_mb: int
+
+
 # STT Manager with enhanced capabilities
 class EnhancedSTTManager:
     def __init__(self):
@@ -136,15 +127,18 @@ class EnhancedSTTManager:
             ".aac",
         ]
         self.translation_services = {
-            "google": "https://translate.googleapis.com/translate_a/single",
-            # می‌تونید سرویس‌های دیگه هم اضافه کنید
+            "google": "http://translate.googleapis.com/translate_a/single",
         }
         self.gpu_client = None
         self.gpu_coordination_enabled = GPU_COORDINATION_AVAILABLE
         self.coordinator_url = os.getenv(
-            "GPU_COORDINATOR_URL", "https://gpu-coordinator:8080"
+            "GPU_COORDINATOR_URL", "http://gpu-coordinator:8080"
         )
         self.gpu_memory_requirement = float(os.getenv("STT_GPU_MEMORY_GB", "2.0"))
+
+        # اضافه کردن retry mechanism بهتر
+        self.gpu_retry_attempts = 3
+        self.gpu_retry_delay = 5  # ثانیه
 
         logger.info(f"🎮 Enhanced STT Manager initialized - Device: {self.device}")
         if self.gpu_coordination_enabled:
@@ -173,47 +167,65 @@ class EnhancedSTTManager:
             logger.error(f"❌ GPU coordination setup failed: {e}")
             return False
 
-    async def request_gpu_if_needed(self):
-        """درخواست GPU از coordinator"""
-        if not self.gpu_client:
-            coordination_ok = await self.setup_gpu_coordination()
-            if not coordination_ok:
-                return False
-
-        # اگر قبلاً GPU گرفته‌ایم، استفاده از همان
-        if self.gpu_client.is_gpu_allocated():
+    async def request_gpu_with_retry(self, memory_gb: float = 2.0):
+        """درخواست GPU با retry mechanism بهتر"""
+        if not self.gpu_coordination_enabled:
+            logger.info("🖥️ GPU coordination disabled, using direct GPU access")
             return True
 
-        try:
-            logger.info(
-                f"🔄 Requesting GPU for STT - Memory: {self.gpu_memory_requirement}GB"
-            )
+        for attempt in range(self.gpu_retry_attempts):
+            try:
+                logger.info(
+                    f"🔄 GPU request attempt {attempt + 1}/{self.gpu_retry_attempts}"
+                )
 
-            allocation = await self.gpu_client.wait_for_gpu(
-                memory_gb=self.gpu_memory_requirement,
-                priority="normal",
-                max_wait_time=60,  # 1 دقیقه انتظار
-            )
+                if not self.gpu_client:
+                    await self.setup_gpu_coordination()
 
-            if allocation.allocated:
-                os.environ["CUDA_VISIBLE_DEVICES"] = str(allocation.gpu_id)
-                self.device = f"cuda:{allocation.gpu_id}"
-                logger.info(f"✅ GPU {allocation.gpu_id} allocated for STT")
-                return True
-            else:
-                logger.warning("⚠️ GPU allocation failed - using CPU/direct GPU")
-                return False
+                if not self.gpu_client:
+                    logger.warning("⚠️ GPU client not available")
+                    return False
 
-        except Exception as e:
-            logger.error(f"❌ GPU request failed: {e}")
-            return False
+                # درخواست GPU
+                allocation = await self.gpu_client.wait_for_gpu(
+                    memory_gb=memory_gb,
+                    priority="normal",
+                    max_wait_time=30,  # کاهش wait time
+                )
+
+                if allocation.allocated:
+                    os.environ["CUDA_VISIBLE_DEVICES"] = str(allocation.gpu_id)
+                    self.device = f"cuda:{allocation.gpu_id}"
+                    logger.info(f"✅ GPU {allocation.gpu_id} allocated for STT")
+                    return True
+                else:
+                    logger.warning(f"⚠️ GPU allocation failed (attempt {attempt + 1})")
+
+                    if attempt < self.gpu_retry_attempts - 1:
+                        logger.info(
+                            f"⏳ Waiting {self.gpu_retry_delay}s before next attempt..."
+                        )
+                        await asyncio.sleep(self.gpu_retry_delay)
+
+            except Exception as e:
+                logger.error(f"❌ GPU request attempt {attempt + 1} failed: {e}")
+                if attempt < self.gpu_retry_attempts - 1:
+                    await asyncio.sleep(self.gpu_retry_delay)
+
+        logger.warning(
+            "⚠️ All GPU allocation attempts failed, falling back to CPU/direct GPU"
+        )
+        return False
 
     async def load_model(self, model_size: str = "base"):
         """Load Whisper model with enhanced error handling"""
         try:
             logger.info(f"📥 Loading Whisper model: {model_size}")
 
-            gpu_coordination_success = await self.request_gpu_if_needed()
+            gpu_coordination_success = await self.request_gpu_with_retry(
+                memory_gb=self.gpu_memory_requirement
+            )
+
             if gpu_coordination_success:
                 logger.info(f"🎮 Using coordinated GPU: {self.device}")
             else:
@@ -232,7 +244,11 @@ class EnhancedSTTManager:
         except Exception as e:
             logger.error(f"❌ Failed to load Whisper model: {e}")
             # در صورت خطا، GPU را آزاد کنید
-            if self.gpu_client and self.gpu_client.is_gpu_allocated():
+            if (
+                self.gpu_client
+                and hasattr(self.gpu_client, "is_gpu_allocated")
+                and self.gpu_client.is_gpu_allocated()
+            ):
                 await self.gpu_client.release_gpu()
             raise
 
@@ -241,7 +257,7 @@ class EnhancedSTTManager:
         try:
             # Create a test audio (1 second of silence)
             test_audio = whisper.pad_or_trim(torch.zeros(16000))
-            if self.device == "cuda":
+            if self.device.startswith("cuda"):
                 test_audio = test_audio.cuda()
 
             # Quick test transcription
@@ -430,7 +446,11 @@ class EnhancedSTTManager:
 
     async def cleanup_gpu(self):
         """پاکسازی GPU coordination"""
-        if self.gpu_client and self.gpu_client.is_gpu_allocated():
+        if (
+            self.gpu_client
+            and hasattr(self.gpu_client, "is_gpu_allocated")
+            and self.gpu_client.is_gpu_allocated()
+        ):
             await self.gpu_client.release_gpu()
             logger.info("✅ GPU released from coordination")
 
@@ -519,7 +539,7 @@ class EnhancedSTTManager:
             # Prepare transcription options
             options = {
                 "task": task,
-                "fp16": torch.cuda.is_available() and self.device == "cuda",
+                "fp16": torch.cuda.is_available() and self.device.startswith("cuda"),
                 "verbose": False,
                 "temperature": 0.0,
                 "best_of": 1,
@@ -638,7 +658,7 @@ class EnhancedSTTManager:
             sl = lang_map.get(source_lang, source_lang)
             tl = lang_map.get(target_lang, target_lang)
 
-            url = "https://translate.googleapis.com/translate_a/single"
+            url = "http://translate.googleapis.com/translate_a/single"
             params = {"client": "gtx", "sl": sl, "tl": tl, "dt": "t", "q": text}
 
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -679,60 +699,71 @@ class EnhancedSTTManager:
 
 
 # Initialize enhanced STT manager
-stt_manager = EnhancedSTTManager()
+stt_manager = None
 
 
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the service on startup"""
+# راه‌اندازی سرویس با مدیریت بهتر GPU
+async def startup():
+    """راه‌اندازی سرویس با مدیریت بهتر GPU"""
+    global stt_manager
+
     try:
+        logger.info("🚀 Starting Enhanced STT Service...")
+
+        # ایجاد STT Manager
+        stt_manager = EnhancedSTTManager()
+
+        # بارگذاری مدل
         model_size = os.getenv("WHISPER_MODEL_SIZE", "base")
         await stt_manager.load_model(model_size)
-        logger.info("🚀 Enhanced STT Service started successfully")
+
+        logger.info("✅ STT Service startup completed successfully")
+
     except Exception as e:
         logger.error(f"❌ STT Service startup failed: {e}")
-        raise
+        # ایجاد fallback manager
+        stt_manager = EnhancedSTTManager()
+        stt_manager.device = "cpu"
+        logger.info("🖥️ Running in fallback mode")
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    try:
-        await stt_manager.cleanup_gpu()
-        logger.info("🛑 STT Service shutdown complete")
-    except Exception as e:
-        logger.error(f"⚠️ Shutdown cleanup error: {e}")
+# استفاده از lifespan به جای on_event (deprecated)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await startup()
+    yield
+    # Shutdown
+    if stt_manager and stt_manager.gpu_client:
+        try:
+            await stt_manager.cleanup_gpu()
+            logger.info("✅ GPU released successfully")
+        except:
+            pass
 
 
-@app.get("/gpu/status")
-async def get_gpu_status():
-    """وضعیت GPU coordination"""
-    if not stt_manager.gpu_coordination_enabled:
-        return {
-            "gpu_coordination": "disabled",
-            "device": stt_manager.device,
-            "message": "GPU coordination not available",
-        }
+# تغییر تعریف app
+app = FastAPI(
+    title="Enhanced STT Service",
+    description="Speech-to-Text Service with GPU Coordination",
+    version="2.0.0",
+    lifespan=lifespan,
+)
 
-    if not stt_manager.gpu_client:
-        return {"gpu_coordination": "not_initialized", "device": stt_manager.device}
-
-    try:
-        coordinator_status = await stt_manager.gpu_client.get_coordinator_status()
-        return {
-            "gpu_coordination": "enabled",
-            "gpu_allocated": stt_manager.gpu_client.is_gpu_allocated(),
-            "current_gpu": stt_manager.gpu_client.get_current_gpu_id(),
-            "device": stt_manager.device,
-            "coordinator_status": coordinator_status,
-        }
-    except Exception as e:
-        return {
-            "gpu_coordination": "error",
-            "error": str(e),
-            "device": stt_manager.device,
-        }
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:8080",
+        "http://yourdomain.com",  # اضافه کردن دامین خودتون
+        "*",  # در production محدود کنید
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 
 # Health check endpoint
@@ -752,23 +783,33 @@ async def health_check():
                 if torch.cuda.device_count() > 0
                 else "Unknown",
             }
+
         gpu_coordination_info = {
-            "enabled": stt_manager.gpu_coordination_enabled,
-            "connected": stt_manager.gpu_client is not None,
+            "enabled": stt_manager.gpu_coordination_enabled if stt_manager else False,
+            "connected": stt_manager.gpu_client is not None if stt_manager else False,
             "allocated": stt_manager.gpu_client.is_gpu_allocated()
-            if stt_manager.gpu_client
+            if stt_manager
+            and stt_manager.gpu_client
+            and hasattr(stt_manager.gpu_client, "is_gpu_allocated")
             else False,
         }
+
         return {
             "status": "healthy",
             "service": "Enhanced STT Service",
             "version": "2.0.0",
-            "device": stt_manager.device,
-            "model_loaded": stt_manager.model is not None,
-            "supported_languages": stt_manager.supported_languages,
-            "supported_formats": stt_manager.supported_formats,
-            "max_file_size_mb": stt_manager.max_file_size / 1024 / 1024,
-            "max_url_file_size_mb": stt_manager.max_url_file_size / 1024 / 1024,
+            "device": stt_manager.device if stt_manager else "unknown",
+            "model_loaded": stt_manager.model is not None if stt_manager else False,
+            "supported_languages": stt_manager.supported_languages
+            if stt_manager
+            else [],
+            "supported_formats": stt_manager.supported_formats if stt_manager else [],
+            "max_file_size_mb": stt_manager.max_file_size / 1024 / 1024
+            if stt_manager
+            else 0,
+            "max_url_file_size_mb": stt_manager.max_url_file_size / 1024 / 1024
+            if stt_manager
+            else 0,
             "gpu_info": gpu_info,
             "gpu_coordination_info": gpu_coordination_info,
             "features": [
@@ -789,6 +830,89 @@ async def health_check():
             "error": str(e),
             "service": "Enhanced STT Service",
             "version": "2.0.0",
+        }
+
+
+@app.get("/model/info", response_model=ModelInfoResponse)
+async def get_model_info():
+    """دریافت اطلاعات مدل STT"""
+    try:
+        supported_languages = os.getenv("SUPPORTED_LANGUAGES", "fa,en").split(",")
+        model_size = os.getenv("WHISPER_MODEL_SIZE", "base")
+        max_file_size = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
+
+        return ModelInfoResponse(
+            model_name=f"whisper-{model_size}",
+            supported_languages=supported_languages,
+            device=stt_manager.device if stt_manager else "unknown",
+            max_file_size_mb=max_file_size,
+            model_size=model_size,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"خطا در دریافت اطلاعات مدل: {str(e)}"
+        )
+
+
+@app.get("/formats", response_model=FormatsResponse)
+async def get_supported_formats():
+    """دریافت فرمت های صوتی پشتیبانی شده"""
+    try:
+        supported_formats = [
+            "wav",
+            "mp3",
+            "m4a",
+            "ogg",
+            "flac",
+            "aac",
+            "wma",
+            "mp4",
+            "avi",
+            "mkv",
+            "mov",
+        ]
+        max_file_size = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
+
+        return FormatsResponse(
+            supported_formats=supported_formats, max_file_size_mb=max_file_size
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"خطا در دریافت فرمت ها: {str(e)}")
+
+
+@app.get("/gpu/status")
+async def get_gpu_status():
+    """وضعیت GPU برای STT"""
+    try:
+        gpu_allocated = False
+        gpu_id = None
+
+        if (
+            stt_manager
+            and stt_manager.gpu_client
+            and hasattr(stt_manager.gpu_client, "is_gpu_allocated")
+        ):
+            gpu_allocated = stt_manager.gpu_client.is_gpu_allocated()
+            if hasattr(stt_manager.gpu_client, "get_current_gpu_id"):
+                gpu_id = stt_manager.gpu_client.get_current_gpu_id()
+
+        return {
+            "service": "stt-service",
+            "gpu_coordination_enabled": stt_manager.gpu_coordination_enabled
+            if stt_manager
+            else False,
+            "gpu_allocated": gpu_allocated,
+            "gpu_id": gpu_id,
+            "current_device": stt_manager.device if stt_manager else "unknown",
+            "coordinator_url": stt_manager.coordinator_url if stt_manager else None,
+            "model_loaded": stt_manager.model is not None if stt_manager else False,
+        }
+    except Exception as e:
+        return {
+            "service": "stt-service",
+            "error": str(e),
+            "gpu_coordination_enabled": False,
+            "gpu_allocated": False,
         }
 
 
@@ -942,16 +1066,18 @@ async def transcribe_batch(files: List[UploadFile] = File(...)):
 async def get_supported_languages():
     """Get comprehensive language and feature information"""
     return {
-        "supported_languages": stt_manager.supported_languages,
+        "supported_languages": stt_manager.supported_languages if stt_manager else [],
         "language_names": {
             "fa": "Persian/Farsi (فارسی)",
             "en": "English",
             "auto": "Auto-detect",
         },
-        "supported_formats": stt_manager.supported_formats,
+        "supported_formats": stt_manager.supported_formats if stt_manager else [],
         "max_file_sizes": {
-            "upload_mb": stt_manager.max_file_size / 1024 / 1024,
-            "url_download_mb": stt_manager.max_url_file_size / 1024 / 1024,
+            "upload_mb": stt_manager.max_file_size / 1024 / 1024 if stt_manager else 0,
+            "url_download_mb": stt_manager.max_url_file_size / 1024 / 1024
+            if stt_manager
+            else 0,
         },
         "input_sources": [
             {

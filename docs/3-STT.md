@@ -223,13 +223,13 @@ docker compose logs -f
 
 ```bash
 # تست سلامت کلی
-curl https://localhost/health
+curl http://localhost/health
 
 # تست سلامت STT
-curl https://localhost/stt/health
+curl http://localhost/stt/health
 
 # تست سلامت LLM
-curl https://localhost/llm/health
+curl http://localhost/llm/health
 ```
 
 ## 🔧 سرویس‌های موجود
@@ -237,7 +237,7 @@ curl https://localhost/llm/health
 ### 1. API Gateway (Port: 8000)
 
 - **نقش**: مدیریت مرکزی درخواست‌ها
-- **URL**: https://localhost:8000
+- **URL**: http://localhost:8000
 - **Endpoints**:
   - `/health` - بررسی سلامت
   - `/api/info` - اطلاعات API
@@ -247,13 +247,13 @@ curl https://localhost/llm/health
 ### 2. LLM Service (Port: 8002)
 
 - **نقش**: تولید متن با مدل GPT2-FA
-- **URL**: https://localhost:8002
+- **URL**: http://localhost:8002
 - **ویژگی‌ها**: تولید متن، گفتگو، پردازش دسته‌ای
 
 ### 3. STT Service (Port: 8003)
 
 - **نقش**: تبدیل گفتار به متن
-- **URL**: https://localhost:8003
+- **URL**: http://localhost:8003
 - **ویژگی‌ها**:
   - پشتیبانی از فرمت‌های مختلف صوتی
   - پردازش Base64 برای موبایل
@@ -263,13 +263,13 @@ curl https://localhost/llm/health
 ### 4. GPU Coordinator (Port: 8080)
 
 - **نقش**: مدیریت مشترک GPU
-- **URL**: https://localhost:8080
+- **URL**: http://localhost:8080
 - **ویژگی‌ها**: تخصیص هوشمند GPU، مدیریت صف
 
 ### 5. Monitoring
 
-- **Prometheus**: https://localhost:9090
-- **Grafana**: https://localhost:3000 (admin/admin)
+- **Prometheus**: http://localhost:9090
+- **Grafana**: http://localhost:3000 (admin/admin)
 
 ## 🧪 تست و استفاده
 
@@ -279,13 +279,13 @@ curl https://localhost/llm/health
 
 ```bash
 # آپلود فایل صوتی
-curl -X POST https://localhost/api/v1/stt/transcribe \
+curl -X POST http://localhost/api/v1/stt/transcribe \
   -F "audio_file=@test_audio.wav" \
   -F "language=fa" \
   -F "task=transcribe"
 
 # بررسی زبان‌های پشتیبانی شده
-curl https://localhost/api/v1/stt/languages
+curl http://localhost/api/v1/stt/languages
 ```
 
 #### 2. تست با Python Client
@@ -315,12 +315,12 @@ python stt_test_client.py --file test_audio.wav --base64 --language fa
 
 ```bash
 # تولید متن
-curl -X POST https://localhost/api/v1/llm/generate \
+curl -X POST http://localhost/api/v1/llm/generate \
   -H "Content-Type: application/json" \
   -d '{"prompt": "سلام", "max_length": 100, "temperature": 0.7}'
 
 # گفتگو
-curl -X POST https://localhost/api/v1/llm/chat \
+curl -X POST http://localhost/api/v1/llm/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "سلام، حالت چطوره؟"}'
 ```
@@ -329,7 +329,7 @@ curl -X POST https://localhost/api/v1/llm/chat \
 
 ### Grafana Dashboard
 
-1. بروید به https://localhost:3000
+1. بروید به http://localhost:3000
 2. وارد شوید با admin/admin
 3. Dashboard های آماده را مشاهده کنید
 
@@ -462,7 +462,7 @@ docker compose restart stt-service
 آپلود و تبدیل فایل صوتی به متن
 
 ```bash
-curl -X POST https://localhost/api/v1/stt/transcribe \
+curl -X POST http://localhost/api/v1/stt/transcribe \
   -F "audio_file=@audio.wav" \
   -F "language=fa" \
   -F "task=transcribe"
@@ -486,7 +486,7 @@ curl -X POST https://localhost/api/v1/stt/transcribe \
 تبدیل صدای Base64 (برای موبایل)
 
 ```bash
-curl -X POST https://localhost/api/v1/stt/transcribe-base64 \
+curl -X POST http://localhost/api/v1/stt/transcribe-base64 \
   -H "Content-Type: application/json" \
   -d '{
     "audio_data": "UklGRnbiAQBXQVZFZm...",
@@ -501,7 +501,7 @@ curl -X POST https://localhost/api/v1/stt/transcribe-base64 \
 پردازش دسته‌ای چندین فایل
 
 ```bash
-curl -X POST https://localhost/api/v1/stt/transcribe-batch \
+curl -X POST http://localhost/api/v1/stt/transcribe-batch \
   -F "files=@audio1.wav" \
   -F "files=@audio2.wav" \
   -F "files=@audio3.wav"
@@ -512,7 +512,7 @@ curl -X POST https://localhost/api/v1/stt/transcribe-batch \
 دریافت زبان‌های پشتیبانی شده
 
 ```bash
-curl https://localhost/api/v1/stt/languages
+curl http://localhost/api/v1/stt/languages
 ```
 
 ## 🔒 امنیت
@@ -521,7 +521,7 @@ curl https://localhost/api/v1/stt/languages
 
 - تغییر پسوردهای پیش‌فرض در production
 - محدودیت CORS برای production
-- استفاده از HTTPS
+- استفاده از HTTP
 - محدودیت rate limiting
 - احراز هویت و اختیارات کاربران
 
@@ -530,7 +530,7 @@ curl https://localhost/api/v1/stt/languages
 - [ ] تغییر JWT_SECRET_KEY
 - [ ] تغییر پسورد پایگاه داده
 - [ ] تنظیم CORS محدود
-- [ ] فعال‌سازی HTTPS
+- [ ] فعال‌سازی HTTP
 - [ ] تنظیم backup خودکار
 - [ ] مانیتورینگ و alerting
 - [ ] تست load testing
@@ -775,7 +775,7 @@ def transcribe_from_url(audio_url, language='auto', translate_to=None):
 
     try:
         response = requests.post(
-            "https://localhost/api/v1/stt/transcribe-url",
+            "http://localhost/api/v1/stt/transcribe-url",
             json=payload,
             params=params,
             timeout=300  # 5 minutes
@@ -804,7 +804,7 @@ def transcribe_from_url(audio_url, language='auto', translate_to=None):
 # استفاده
 # تبدیل از یک پادکست فارسی و ترجمه به انگلیسی
 result = transcribe_from_url(
-    "https://example.com/persian_podcast.mp3",
+    "http://example.com/persian_podcast.mp3",
     language="fa",
     translate_to="en"
 )
@@ -814,7 +814,7 @@ result = transcribe_from_url(
 
 ```bash
 # cURL Example
-curl -X POST https://localhost/api/v1/stt/transcribe-local \
+curl -X POST http://localhost/api/v1/stt/transcribe-local \
   -H "Content-Type: application/json" \
   -d '{
     "file_path": "/app/uploads/meeting_recording.wav",
@@ -849,7 +849,7 @@ def transcribe_and_translate(audio_file_path, source_lang="fa", target_lang="en"
         }
 
         response = requests.post(
-            "https://localhost:8003/transcribe",
+            "http://localhost:8003/transcribe",
             files=files,
             data=data
         )
@@ -926,7 +926,7 @@ def batch_transcribe_files(file_paths, translate_to=None):
         data['translate_to'] = translate_to
 
     response = requests.post(
-        "https://localhost:8003/transcribe-batch",
+        "http://localhost:8003/transcribe-batch",
         files=files,
         data=data,
         timeout=1800  # 30 minutes
@@ -968,7 +968,7 @@ batch_transcribe_files(audio_files, translate_to="en")
 ```python
 class OnlineLearningPlatform:
     def __init__(self):
-        self.stt_base_url = "https://localhost:8003"
+        self.stt_base_url = "http://localhost:8003"
 
     def process_lecture_recording(self, lecture_file, instructor_language="fa"):
         """پردازش ضبط جلسه درس"""
@@ -1047,7 +1047,7 @@ with open("lecture_fa.srt", "w", encoding="utf-8") as f:
 ```python
 class CallCenterManager:
     def __init__(self):
-        self.stt_url = "https://localhost:8003"
+        self.stt_url = "http://localhost:8003"
 
     def process_customer_call(self, call_recording_url, customer_language="fa"):
         """پردازش تماس مشتری"""
@@ -1097,7 +1097,7 @@ class CallCenterManager:
 # استفاده
 call_center = CallCenterManager()
 call_data = call_center.process_customer_call(
-    "https://storage.example.com/calls/call_123.mp3",
+    "http://storage.example.com/calls/call_123.mp3",
     "fa"
 )
 
@@ -1463,7 +1463,7 @@ response = requests.post(
 import requests
 
 payload = {
-    "url": "https://example.com/audio.mp3",
+    "url": "http://example.com/audio.mp3",
     "language": "auto",
     "max_file_size": 50  # MB
 }
@@ -1789,7 +1789,7 @@ python main.py  # لاگ‌ها در کنسول نمایش داده می‌شو�
 - Rate limiting پیاده‌سازی کنید
 - Authentication اضافه کنید
 - لاگ‌گیری و مانیتورینگ تنظیم کنید
-- HTTPS استفاده کنید
+- HTTP استفاده کنید
 
 ---
 
